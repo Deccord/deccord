@@ -1,4 +1,4 @@
-name: CI Build
+name: CI
 
 on:
   push:
@@ -194,16 +194,62 @@ jobs:
           git config --global --add advice.detachedHead false
           git config --global --add safe.directory "$PWD"
           GIT_HEAD="$(git rev-parse HEAD)"
-          git checkout develop
+          # Skip develop branch checkout
+          # git checkout develop
           git checkout ${GIT_HEAD}
+          
+          # Setup build environment
           CCACHE_SIZE="400M"
           CACHE_DIR="/cache"
-          mkdir /output
+          mkdir -p /output
           BASE_OUTDIR="/output"
           BUILD_TARGET="${{ matrix.build_target }}"
+          
+          # Install build dependencies
+          apt-get update
+          apt-get install -y build-essential libtool autotools-dev automake pkg-config bsdmainutils python3 \
+            make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+            wget curl llvm libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+          
+          # Install pyenv and Python 3.8.16
+          curl https://pyenv.run | bash
+          export PATH="$HOME/.pyenv/bin:$PATH"
+          eval "$(pyenv init -)"
+          eval "$(pyenv virtualenv-init -)"
+          pyenv install 3.8.16
+          pyenv global 3.8.16
+          
+          # Show system information
+          uname -a
+          gcc --version
+          python --version
+          
+          # Run autogen and configure with verbose output
+          ./autogen.sh
+          cd build-ci
+          ../configure --enable-debug --disable-dependency-tracking \
+            --prefix=$DEPENDS_DIR/$HOST \
+            --bindir=$BASE_OUTDIR/bin \
+            --libdir=$BASE_OUTDIR/lib \
+            --with-utils \
+            --with-libs \
+            --with-daemon \
+            --enable-debug \
+            V=1 || (cat config.log && false)
+          
+          # Build source
           source ./ci/deccord/matrix.sh
           ./ci/deccord/build_src.sh
           ./ci/deccord/test_unittests.sh
+        env:
+          DOCKER_DRIVER: overlay2
+          FAST_MODE: false
+          HOST: ${{ matrix.host }}
+          DEPENDS_DIR: /depends
+          CC: gcc
+          CXX: g++
+          PYENV_ROOT: "$HOME/.pyenv"
+          PATH: "$PYENV_ROOT/bin:$PATH"
         shell: bash
 
       - name: Upload build artifacts
